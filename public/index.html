@@ -189,10 +189,54 @@
             }
         }
 
-        .error-message {
-            color: #ef4444;
-            display: none;
-            text-align: center;
+        /* Improved Select Styling */
+        .styled-select {
+            background-color: var(--card-bg);
+            color: #fff;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            padding: 10px 15px;
+            border-radius: 8px;
+            font-family: inherit;
+            font-size: 1.1rem;
+            /* Larger text */
+            cursor: pointer;
+            outline: none;
+            transition: border-color 0.3s;
+        }
+
+        .styled-select:focus {
+            border-color: var(--accent-color);
+        }
+
+        .styled-select option {
+            background-color: var(--card-bg);
+            color: #fff;
+        }
+
+        /* Toggle Button */
+        .toggle-container {
+            display: flex;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            padding: 4px;
+            gap: 5px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .toggle-btn {
+            padding: 6px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            color: var(--secondary-text);
+            transition: all 0.3s ease;
+            user-select: none;
+        }
+
+        .toggle-btn.active {
+            background-color: var(--accent-color);
+            color: #000;
+            font-weight: 600;
         }
     </style>
 </head>
@@ -210,7 +254,7 @@
                         <div class="subtitle">Liquidity Index Growth</div>
                     </div>
                 </div>
-                <select id="marketSelect" class="market-select" onchange="changeMarket(this.value)"
+                <select id="marketSelect" class="styled-select" onchange="changeMarket(this.value)"
                     style="margin-top: 15px;">
                     <option value="SNEK">SNEK</option>
                     <option value="ADA">ADA</option>
@@ -222,9 +266,12 @@
                     <option value="NIGHT">NIGHT</option>
                 </select>
             </div>
-            <div class="current-stat">
-                <div class="stat-value" id="currentRatio">--</div>
-                <div class="stat-label">Current Index</div>
+            <div class="current-stat" style="display: flex; flex-direction: column; align-items: flex-end; gap: 10px;">
+
+                <div>
+                    <div class="stat-value" id="currentRatio">--</div>
+                    <div class="stat-label">Current Index</div>
+                </div>
             </div>
         </header>
 
@@ -251,7 +298,15 @@
         <div class="chart-container" style="margin-top: 50px; height: 350px;">
             <div style="margin-bottom: 15px; display: flex; align-items: baseline; gap: 10px;">
                 <h2 style="font-size: 1.5rem; font-weight: 600; color: var(--text-color);">Price History</h2>
-                <span style="font-size: 0.9rem; color: var(--secondary-text);">(vs USDT)</span>
+                <div
+                    style="font-size: 0.9rem; color: var(--secondary-text); display: flex; align-items: center; gap: 5px;">
+                    vs
+                    <select id="currencySelect" class="styled-select" style="font-size: 1rem; padding: 5px 10px;"
+                        onchange="changeCurrency(this.value)">
+                        <option value="usd">USDT ($)</option>
+                        <option value="ada">ADA (₳)</option>
+                    </select>
+                </div>
             </div>
             <div class="loading" id="priceLoading" style="display: none;">
                 <div class="spinner"></div>
@@ -281,6 +336,9 @@
         let chartInstance = null;
         let priceChartInstance = null;
         let currentRange = 'ALL';
+        let currentCurrency = 'usd';
+        let yieldMode = 'ASSET'; // 'ASSET' or 'USD'
+        let fullPriceHistory = []; // For USD Yield Calc
 
         const COIN_IDS = {
             'SNEK': 'snek',
@@ -323,16 +381,21 @@
                     logoImg.style.display = 'block';
                 }
 
+                fetchFullPriceHistory(currentAsset);
                 processData(currentAsset);
             } catch (error) {
                 console.error(error);
                 document.getElementById('loading').style.display = 'none';
-                document.getElementById('errorMessage').style.display = 'block';
+                const errorDiv = document.getElementById('errorMessage');
+                errorDiv.innerHTML = `Failed to load data: ${error.message || error}<br><small>Ensure 'node local-server.js' is running.</small>`;
+                errorDiv.style.display = 'block';
             }
         }
 
         function changeMarket(asset) {
             currentAsset = asset;
+            fullPriceHistory = [];
+            fetchFullPriceHistory(asset);
             document.getElementById('loading').style.display = 'flex';
 
             // Update Logo
@@ -351,6 +414,34 @@
             }, 100);
         }
 
+        async function fetchFullPriceHistory(asset) {
+            const coinId = COIN_IDS[asset];
+            if (!coinId) return;
+            try {
+                // Always fetch USD max history for calculation
+                const res = await fetch(`/api/price-history?coin=${coinId}&days=max&currency=usd`);
+                if (res.ok) {
+                    const json = await res.json();
+                    fullPriceHistory = json.prices || [];
+                    console.log('Fetched full price history for USD calculation');
+                    if (yieldMode === 'USD') {
+                        processData(asset);
+                    }
+                }
+            } catch (e) {
+                console.error('Failed to fetch full history for USD calc', e);
+            }
+        }
+
+
+
+        function changeCurrency(currency) {
+            if (currentCurrency === currency) return;
+            currentCurrency = currency;
+            // Refresh price chart with new currency
+            updateChart(currentRange);
+        }
+
         function processData(asset) {
             if (!rawApiData || !rawApiData.assets) return;
 
@@ -361,25 +452,72 @@
             }
 
             const dailyRatios = assetData.dailyRatios;
+            let timePoints = [];
 
-            // Get current Ratio (last point)
-            const lastEntry = dailyRatios[dailyRatios.length - 1];
-            if (lastEntry) {
-                document.getElementById('currentRatio').innerText = lastEntry.ratio.toFixed(4);
-            }
-
-            const timePoints = dailyRatios.map(entry => {
-                return {
+            if (yieldMode === 'ASSET') {
+                timePoints = dailyRatios.map(entry => ({
                     x: new Date(entry.date).getTime(),
                     y: entry.ratio
-                };
-            });
+                }));
+            } else {
+                // USD Mode
+                if (fullPriceHistory.length > 0) {
+                    // Create Price Map (YYYY-MM-DD -> Price)
+                    const priceMap = {};
+                    fullPriceHistory.forEach(p => {
+                        const dateStr = new Date(p[0]).toISOString().split('T')[0];
+                        priceMap[dateStr] = p[1];
+                    });
 
-            // unique and sort (though API likely returns sorted)
+                    let rawPoints = dailyRatios.map(entry => {
+                        const d = new Date(entry.date); // UTC
+                        const dateStr = d.toISOString().split('T')[0];
+                        let price = priceMap[dateStr];
+
+                        // Fallback: Try previous day if missing
+                        if (price === undefined) {
+                            const prevDay = new Date(d);
+                            prevDay.setDate(d.getDate() - 1);
+                            price = priceMap[prevDay.toISOString().split('T')[0]];
+                        }
+
+                        return {
+                            x: d.getTime(),
+                            y: entry.ratio * (price || 0)
+                        };
+                    }).filter(p => p.y > 0);
+
+                    // Sort before normalization
+                    rawPoints.sort((a, b) => a.x - b.x);
+
+                    // Normalize: start at 1.0
+                    if (rawPoints.length > 0) {
+                        const baseVal = rawPoints[0].y;
+                        if (baseVal > 0) {
+                            timePoints = rawPoints.map(p => ({
+                                x: p.x,
+                                y: p.y / baseVal
+                            }));
+                        }
+                    }
+                }
+            }
+
+            // sort
             timePoints.sort((a, b) => a.x - b.x);
             fullDataPoints = timePoints;
 
-            console.log(`Loaded ${fullDataPoints.length} historical data points for ${asset}`);
+            // Update Current Index Display
+            const lastEntry = timePoints.length > 0 ? timePoints[timePoints.length - 1] : null;
+            const label = document.getElementById('currentRatio');
+
+            if (lastEntry) {
+                label.innerText = lastEntry.y.toFixed(4);
+            } else {
+                label.innerText = '--';
+            }
+
+            console.log(`Loaded ${fullDataPoints.length} points for ${asset} (${yieldMode})`);
 
             // Update with current range
             updateChart(currentRange);
@@ -404,7 +542,7 @@
             }
 
             try {
-                let url = `/api/price-history?coin=${coinId}`;
+                let url = `/api/price-history?coin=${coinId}&currency=${currentCurrency}`;
 
                 if (from && to) {
                     url += `&from=${from}&to=${to}`;
@@ -458,7 +596,7 @@
                 type: 'line',
                 data: {
                     datasets: [{
-                        label: 'Price (USD)',
+                        label: `Price (${currentCurrency.toUpperCase()})`,
                         data: dataPoints,
                         borderColor: '#38bdf8',
                         backgroundColor: gradient,
@@ -481,7 +619,8 @@
                         tooltip: {
                             callbacks: {
                                 label: function (context) {
-                                    return `Price: $${context.parsed.y.toPrecision(5)}`;
+                                    const symbol = currentCurrency === 'usd' ? '$' : '₳';
+                                    return `Price: ${symbol}${context.parsed.y.toPrecision(5)}`;
                                 }
                             }
                         }
@@ -490,7 +629,11 @@
                         x: {
                             type: 'time',
                             time: {
-                                unit: 'day', // Automatic usually works best but keeping consistent
+                                unit: 'day',
+                                tooltipFormat: 'MMM dd',
+                                displayFormats: {
+                                    day: 'MMM dd'
+                                }
                             },
                             grid: { color: 'rgba(255, 255, 255, 0.05)' },
                             ticks: { color: '#9ca3af', display: true }
@@ -566,7 +709,7 @@
                 type: 'line',
                 data: {
                     datasets: [{
-                        label: 'LP Liquidity Index',
+                        label: yieldMode === 'USD' ? 'LP Performance (USD Basis)' : 'LP Liquidity Index',
                         data: dataPoints, // Objects {x, y}
                         borderColor: '#fca311',
                         backgroundColor: gradient,
@@ -599,6 +742,9 @@
                             displayColors: false,
                             callbacks: {
                                 label: function (context) {
+                                    if (yieldMode === 'USD') {
+                                        return `Index (USD): ${context.parsed.y.toFixed(4)}`;
+                                    }
                                     return `Index: ${context.parsed.y.toFixed(4)}`;
                                 }
                             }
@@ -612,6 +758,7 @@
                             type: 'time', // CRITICAL: Use time scale
                             time: {
                                 unit: 'day',
+                                tooltipFormat: 'MMM dd',
                                 displayFormats: {
                                     day: 'MMM dd'
                                 }
