@@ -238,6 +238,14 @@
             color: #000;
             font-weight: 600;
         }
+
+        .error-message {
+            display: none;
+            color: #ef4444;
+            text-align: center;
+            margin-top: 20px;
+            font-size: 1.1rem;
+        }
     </style>
 </head>
 
@@ -288,7 +296,7 @@
                 <div class="spinner"></div>
                 <div>Fetching On-Chain Data...</div>
             </div>
-            <div class="error-message" id="errorMessage">
+            <div class="error-message" id="errorMessage" style="display: none;">
                 Failed to load data.
             </div>
             <canvas id="yieldChart"></canvas>
