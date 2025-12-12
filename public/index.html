@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Strike Finance | LP Yield</title>
+    <!-- Chart.js and Date Adapter -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script
+        src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #0a0b0e;
+            --card-bg: #14161b;
+            --accent-color: #fca311;
+            /* Default accent */
+            --text-color: #e5e5e5;
+            --secondary-text: #9ca3af;
+            --grid-color: rgba(255, 255, 255, 0.05);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 1000px;
+            background: var(--card-bg);
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        header {
+            margin-bottom: 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+
+        .header-left {
+            display: flex;
+            flex-direction: column;
+        }
+
+        h1 {
+            font-size: 2rem;
+            font-weight: 700;
+            background: linear-gradient(90deg, #fff, #999);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .subtitle {
+            color: var(--secondary-text);
+            font-size: 0.9rem;
+            margin-top: 5px;
+        }
+
+        /* Market Selector */
+        .market-select {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: var(--text-color);
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-family: inherit;
+            font-size: 1rem;
+            cursor: pointer;
+            outline: none;
+            margin-top: 10px;
+        }
+
+        .market-select:focus {
+            border-color: var(--accent-color);
+        }
+
+        .current-stat {
+            text-align: right;
+        }
+
+        .stat-value {
+            font-size: 2rem;
+            font-weight: 600;
+            color: var(--accent-color);
+        }
+
+        .stat-label {
+            font-size: 0.8rem;
+            color: var(--secondary-text);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .chart-container {
+            position: relative;
+            height: 400px;
+            width: 100%;
+        }
+
+        footer {
+            margin-top: 60px;
+            padding-top: 20px;
+            text-align: center;
+            font-size: 0.8rem;
+            color: var(--secondary-text);
+            border-top: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .controls {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .btn {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: var(--secondary-text);
+            padding: 8px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 0.9rem;
+            transition: all 0.3s ease;
+        }
+
+        .btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+        }
+
+        .btn.active {
+            background: var(--accent-color);
+            color: #000;
+            border-color: var(--accent-color);
+            font-weight: 600;
+        }
+
+        /* Loading State */
+        .loading {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background: var(--card-bg);
+            z-index: 10;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid rgba(255, 255, 255, 0.1);
+            border-top-color: var(--accent-color);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 15px;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .error-message {
+            color: #ef4444;
+            display: none;
+            text-align: center;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="container">
+        <header>
+            <div class="header-left">
+                <div style="display: flex; align-items: center; gap: 15px;">
+                    <img id="assetLogo" src="" alt="Logo"
+                        style="width: 40px; height: 40px; border-radius: 50%; display: none;">
+                    <div>
+                        <h1>Strike LP Yield</h1>
+                        <div class="subtitle">Liquidity Index Growth</div>
+                    </div>
+                </div>
+                <select id="marketSelect" class="market-select" onchange="changeMarket(this.value)"
+                    style="margin-top: 15px;">
+                    <option value="SNEK">SNEK</option>
+                    <option value="ADA">ADA</option>
+                    <option value="BTC">BTC</option>
+                    <option value="IAG">IAG</option>
+                    <option value="WMTX">WMTX</option>
+                    <option value="MIN">MIN</option>
+                    <option value="STRIKE">STRIKE</option>
+                    <option value="NIGHT">NIGHT</option>
+                </select>
+            </div>
+            <div class="current-stat">
+                <div class="stat-value" id="currentRatio">--</div>
+                <div class="stat-label">Current Index</div>
+            </div>
+        </header>
+
+        <div class="controls">
+            <button class="btn active" onclick="updateChart('ALL')">ALL</button>
+            <button class="btn" onclick="updateChart('1Y')">1Y</button>
+            <button class="btn" onclick="updateChart('6M')">6M</button>
+            <button class="btn" onclick="updateChart('1M')">1M</button>
+            <button class="btn" onclick="updateChart('1W')">1W</button>
+        </div>
+
+        <div class="chart-container">
+            <div class="loading" id="loading">
+                <div class="spinner"></div>
+                <div>Fetching On-Chain Data...</div>
+            </div>
+            <div class="error-message" id="errorMessage">
+                Failed to load data. <br>
+                <small>Ensure 'node server.js' is running.</small>
+            </div>
+            <canvas id="yieldChart"></canvas>
+        </div>
+
+        <div class="chart-container" style="margin-top: 50px; height: 350px;">
+            <div style="margin-bottom: 15px; display: flex; align-items: baseline; gap: 10px;">
+                <h2 style="font-size: 1.5rem; font-weight: 600; color: var(--text-color);">Price History</h2>
+                <span style="font-size: 0.9rem; color: var(--secondary-text);">(vs USDT)</span>
+            </div>
+            <div class="loading" id="priceLoading" style="display: none;">
+                <div class="spinner"></div>
+                <div>Fetching Price Data...</div>
+            </div>
+            <div class="error-message" id="priceErrorMessage">
+                Price data not available
+            </div>
+            <canvas id="priceChart"></canvas>
+        </div>
+
+        <footer>
+            Data source: Strike Finance API |
+            <span style="color: var(--secondary-text); font-size: 0.7rem;">
+                Historical data provided by API
+            </span>
+        </footer>
+    </div>
+
+    <script>
+        const API_URL = '/api/ratios'; // Use local proxy
+
+        // Global state
+        let rawApiData = null;
+        let currentAsset = 'SNEK';
+        let fullDataPoints = [];
+        let chartInstance = null;
+        let priceChartInstance = null;
+        let currentRange = 'ALL';
+
+        const COIN_IDS = {
+            'SNEK': 'snek',
+            'ADA': 'cardano',
+            'BTC': 'bitcoin',
+            'IAG': 'iagon',
+            'WMTX': 'world-mobile-token',
+            'MIN': 'minswap',
+            'STRIKE': 'strike-2',
+            'NIGHT': 'midnight-3'
+        };
+
+        const LOGO_MAP = {
+            'SNEK': 'https://coin-images.coingecko.com/coins/images/30496/large/snek_icon_200_v2.png?1737994261',
+            'ADA': 'https://coin-images.coingecko.com/coins/images/975/large/cardano.png?1696502090',
+            'BTC': 'https://coin-images.coingecko.com/coins/images/1/large/bitcoin.png?1696501400',
+            'IAG': 'https://coin-images.coingecko.com/coins/images/3264/large/d8c5hLbX9u0GwYCKcZRbXS2vAQ0Vd-Hfjg-3zQ73ucSZQoFYsLH4NEKN8EQkwwBVR8OPJgrTRG-_dW_XVHL058ezYSvwsSB4bjYtHH7xjZNHBaAaX1NZl7axG8zm2FIRV6AUmgdmxcbP0BcuWvUJkcUKrYYEDf0Msx2_3arxgmS1V85YMb_1SVbWt6E3QnkpvLcGyC0SxN6rGTr.jpg?1696503977',
+            'WMTX': 'https://coin-images.coingecko.com/coins/images/17333/large/Token_icon_round_1024.png?1741247846',
+            'MIN': 'https://coin-images.coingecko.com/coins/images/27823/large/Logo_Round.png?1727293179',
+            'STRIKE': 'https://coin-images.coingecko.com/coins/images/50560/large/1.png?1728370388',
+            'NIGHT': 'https://coin-images.coingecko.com/coins/images/71015/large/midnight.png?1765193080'
+        };
+
+        async function init() {
+            try {
+                const response = await fetch(API_URL);
+                if (!response.ok) throw new Error('API Request Failed');
+
+                const json = await response.json();
+                if (json.success && json.data) {
+                    rawApiData = json.data;
+                } else {
+                    throw new Error('Invalid API Response');
+                }
+
+                // Initial Logo Set
+                const logoImg = document.getElementById('assetLogo');
+                if (LOGO_MAP[currentAsset]) {
+                    logoImg.src = LOGO_MAP[currentAsset];
+                    logoImg.style.display = 'block';
+                }
+
+                processData(currentAsset);
+            } catch (error) {
+                console.error(error);
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('errorMessage').style.display = 'block';
+            }
+        }
+
+        function changeMarket(asset) {
+            currentAsset = asset;
+            document.getElementById('loading').style.display = 'flex';
+
+            // Update Logo
+            const logoImg = document.getElementById('assetLogo');
+            if (LOGO_MAP[asset]) {
+                logoImg.src = LOGO_MAP[asset];
+                logoImg.style.display = 'block';
+            } else {
+                logoImg.style.display = 'none';
+            }
+
+            // Allow spinner to show briefly
+            setTimeout(() => {
+                processData(asset);
+                document.getElementById('loading').style.display = 'none';
+            }, 100);
+        }
+
+        function processData(asset) {
+            if (!rawApiData || !rawApiData.assets) return;
+
+            const assetData = rawApiData.assets[asset];
+            if (!assetData || !assetData.dailyRatios) {
+                console.warn(`No data for ${asset}`);
+                return;
+            }
+
+            const dailyRatios = assetData.dailyRatios;
+
+            // Get current Ratio (last point)
+            const lastEntry = dailyRatios[dailyRatios.length - 1];
+            if (lastEntry) {
+                document.getElementById('currentRatio').innerText = lastEntry.ratio.toFixed(4);
+            }
+
+            const timePoints = dailyRatios.map(entry => {
+                return {
+                    x: new Date(entry.date).getTime(),
+                    y: entry.ratio
+                };
+            });
+
+            // unique and sort (though API likely returns sorted)
+            timePoints.sort((a, b) => a.x - b.x);
+            fullDataPoints = timePoints;
+
+            console.log(`Loaded ${fullDataPoints.length} historical data points for ${asset}`);
+
+            // Update with current range
+            updateChart(currentRange);
+        }
+
+
+
+        async function fetchPriceHistory(asset, days, from = null, to = null) {
+            const coinId = COIN_IDS[asset];
+            if (!coinId) {
+                document.getElementById('priceLoading').style.display = 'none';
+                document.getElementById('priceErrorMessage').style.display = 'block';
+                return;
+            }
+
+            // Reset UI
+            document.getElementById('priceLoading').style.display = 'flex';
+            document.getElementById('priceErrorMessage').style.display = 'none';
+            if (priceChartInstance) {
+                priceChartInstance.destroy();
+                priceChartInstance = null;
+            }
+
+            try {
+                let url = `/api/price-history?coin=${coinId}`;
+
+                if (from && to) {
+                    url += `&from=${from}&to=${to}`;
+                } else {
+                    let dayParam = '365'; // Default fallback
+                    switch (days) {
+                        case '1W': dayParam = '7'; break;
+                        case '1M': dayParam = '30'; break;
+                        case '6M': dayParam = '180'; break; // Added back 6M
+                        case '1Y': dayParam = '365'; break;
+                        case 'ALL': dayParam = 'max'; break;
+                    }
+                    url += `&days=${dayParam}`;
+                }
+
+                const res = await fetch(url);
+                if (!res.ok) throw new Error('CoinGecko Proxy Error');
+
+                const data = await res.json();
+                const prices = data.prices; // [[timestamp, price], ...]
+
+                const chartData = prices.map(p => ({ x: p[0], y: p[1] }));
+                renderPriceChart(chartData);
+
+            } catch (e) {
+                console.error(e);
+                clearPriceChart();
+                document.getElementById('priceErrorMessage').style.display = 'block';
+            } finally {
+                document.getElementById('priceLoading').style.display = 'none';
+            }
+        }
+
+        function clearPriceChart() {
+            if (priceChartInstance) {
+                priceChartInstance.destroy();
+                priceChartInstance = null;
+            }
+        }
+
+        function renderPriceChart(dataPoints) {
+            const ctx = document.getElementById('priceChart').getContext('2d');
+            clearPriceChart();
+
+            // Gradient for Price
+            const gradient = ctx.createLinearGradient(0, 0, 0, 300);
+            gradient.addColorStop(0, 'rgba(56, 189, 248, 0.2)'); // Light Blue
+            gradient.addColorStop(1, 'rgba(56, 189, 248, 0)');
+
+            priceChartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    datasets: [{
+                        label: 'Price (USD)',
+                        data: dataPoints,
+                        borderColor: '#38bdf8',
+                        backgroundColor: gradient,
+                        borderWidth: 2,
+                        pointRadius: 0,
+                        pointHoverRadius: 4,
+                        fill: true,
+                        tension: 0.1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        intersect: false,
+                        mode: 'index',
+                    },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: function (context) {
+                                    return `Price: $${context.parsed.y.toPrecision(5)}`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            type: 'time',
+                            time: {
+                                unit: 'day', // Automatic usually works best but keeping consistent
+                            },
+                            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                            ticks: { color: '#9ca3af', display: true }
+                        },
+                        y: {
+                            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                            ticks: { color: '#9ca3af' }
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateChart(range) {
+            currentRange = range;
+
+            // Update buttons
+            document.querySelectorAll('.controls .btn').forEach(btn => {
+                if (btn.innerText === range) btn.classList.add('active');
+                else btn.classList.remove('active');
+            });
+
+            // Filter Data
+            const now = new Date();
+            let cutoffTime = 0;
+
+            switch (range) {
+                case '1W':
+                    cutoffTime = now.getTime() - (7 * 24 * 60 * 60 * 1000);
+                    break;
+                case '1M':
+                    cutoffTime = now.getTime() - (30 * 24 * 60 * 60 * 1000);
+                    break;
+                case '6M':
+                    cutoffTime = now.getTime() - (180 * 24 * 60 * 60 * 1000);
+                    break;
+                case '1Y':
+                    cutoffTime = now.getTime() - (365 * 24 * 60 * 60 * 1000);
+                    break;
+                case 'ALL':
+                default:
+                    cutoffTime = 0; // All data
+            }
+
+            const filteredPoints = fullDataPoints.filter(p => p.x >= cutoffTime);
+            renderChart(filteredPoints);
+
+            // Also update price chart with exact timestamps
+            if (filteredPoints.length > 0) {
+                const startDate = Math.floor(filteredPoints[0].x / 1000); // x is already a timestamp
+                const endDate = Math.floor(filteredPoints[filteredPoints.length - 1].x / 1000);
+                fetchPriceHistory(currentAsset, range, startDate, endDate);
+            } else {
+                // Fallback if no data
+                fetchPriceHistory(currentAsset, range);
+            }
+        }
+
+        function renderChart(dataPoints) {
+            const ctx = document.getElementById('yieldChart').getContext('2d');
+            document.getElementById('loading').style.display = 'none';
+
+            if (chartInstance) {
+                chartInstance.destroy();
+            }
+
+            // Create gradient
+            const gradient = ctx.createLinearGradient(0, 0, 0, 400);
+            gradient.addColorStop(0, 'rgba(252, 163, 17, 0.2)');
+            gradient.addColorStop(1, 'rgba(252, 163, 17, 0)');
+
+            chartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    datasets: [{
+                        label: 'LP Liquidity Index',
+                        data: dataPoints, // Objects {x, y}
+                        borderColor: '#fca311',
+                        backgroundColor: gradient,
+                        borderWidth: 3,
+                        pointBackgroundColor: '#fff',
+                        pointBorderColor: '#fca311',
+                        pointHoverBackgroundColor: '#fca311',
+                        pointHoverBorderColor: '#fff',
+                        pointRadius: 4,
+                        pointHoverRadius: 6,
+                        fill: true,
+                        tension: 0.1 // Lighter tension for time series
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        intersect: false,
+                        mode: 'index',
+                    },
+                    plugins: {
+                        tooltip: {
+                            backgroundColor: 'rgba(20, 22, 27, 0.9)',
+                            titleColor: '#fff',
+                            bodyColor: '#ccc',
+                            borderColor: 'rgba(255,255,255,0.1)',
+                            borderWidth: 1,
+                            padding: 10,
+                            displayColors: false,
+                            callbacks: {
+                                label: function (context) {
+                                    return `Index: ${context.parsed.y.toFixed(4)}`;
+                                }
+                            }
+                        },
+                        legend: {
+                            display: false
+                        }
+                    },
+                    scales: {
+                        x: {
+                            type: 'time', // CRITICAL: Use time scale
+                            time: {
+                                unit: 'day',
+                                displayFormats: {
+                                    day: 'MMM dd'
+                                }
+                            },
+                            grid: {
+                                color: 'rgba(255, 255, 255, 0.05)'
+                            },
+                            ticks: {
+                                color: '#9ca3af',
+                                source: 'auto'
+                            }
+                        },
+                        y: {
+                            grid: {
+                                color: 'rgba(255, 255, 255, 0.05)'
+                            },
+                            ticks: {
+                                color: '#9ca3af'
+                            },
+                            beginAtZero: false
+                        }
+                    }
+                }
+            });
+        }
+
+
+
+        // Start
+        init();
+    </script>
+</body>
+
+</html>

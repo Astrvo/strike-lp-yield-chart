@@ -1,0 +1,8 @@
+{
+  "name": "strike-lp-yield",
+  "version": "1.0.0",
+  "scripts": {
+    "start": "node local-server.js"
+  },
+  "dependencies": {}
+}
