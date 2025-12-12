@@ -289,8 +289,7 @@
                 <div>Fetching On-Chain Data...</div>
             </div>
             <div class="error-message" id="errorMessage">
-                Failed to load data. <br>
-                <small>Ensure 'node server.js' is running.</small>
+                Failed to load data.
             </div>
             <canvas id="yieldChart"></canvas>
         </div>
@@ -387,7 +386,8 @@
                 console.error(error);
                 document.getElementById('loading').style.display = 'none';
                 const errorDiv = document.getElementById('errorMessage');
-                errorDiv.innerHTML = `Failed to load data: ${error.message || error}<br><small>Ensure 'node local-server.js' is running.</small>`;
+                // Removed specific "node server.js" instruction as requested
+                errorDiv.innerHTML = `Failed to load data: ${error.message || error}`;
                 errorDiv.style.display = 'block';
             }
         }
