@@ -16,20 +16,15 @@ http.get('http://localhost:3000/api/ratios', (res) => {
             const asset = 'SNEK'; // Default asset
             const assetData = json.data.assets[asset];
 
-            if (!assetData) {
-                console.log(`No data for ${asset}`);
-                return;
-            }
-
             if (assetData.dailyRatios) {
                 console.log(`Total Ratios for ${asset}: ${assetData.dailyRatios.length}`);
-                const slice = assetData.dailyRatios.slice(-10);
-                console.log('Last 10 Ratios:');
-                console.log(JSON.stringify(slice, null, 2));
+                const last = assetData.dailyRatios[assetData.dailyRatios.length - 1];
+                console.log('Last Ratio:', JSON.stringify(last, null, 2));
 
-                // Check if they are all 1
-                const allOnes = slice.every(r => r.ratio === 1);
-                console.log(`Are last 10 ratios all 1? ${allOnes}`);
+                const today = new Date().toISOString().split('T')[0];
+                const lastDate = last.date.split('T')[0];
+                console.log(`Is last date today (${today})? ${lastDate === today}`);
+                console.log(`Is ratio != 1? ${last.ratio !== 1}`);
             } else {
                 console.log('No dailyRatios found.');
             }

@@ -2,7 +2,11 @@ const https = require('https');
 const url = require('url');
 
 const API_URL = 'https://app.strikefinance.org/api/perpetuals/getHistoricalRatios';
+const LIVE_API_URL = 'https://app.strikefinance.org/api/perpetuals/ratios';
 const CG_API_KEY = 'CG-zdXqbkDWtCUhFgwBBAkXDwBv';
+
+const LIVE_CACHE = { timestamp: 0, data: null };
+const LIVE_CACHE_DURATION = 5 * 60 * 1000; // 5 Minutes
 
 const PRICE_CACHE = {};
 const CACHE_DURATION = 60 * 60 * 1000; // 1 Hour
@@ -130,25 +134,78 @@ module.exports = async (req, res) => {
     // RATIO PROXY
     if (req.url === '/api/ratios') {
         try {
+            // Helper: Get Live Rates
+            async function getLiveRates() {
+                const now = Date.now();
+                if (LIVE_CACHE.data && (now - LIVE_CACHE.timestamp < LIVE_CACHE_DURATION)) {
+                    return LIVE_CACHE.data;
+                }
+
+                try {
+                    const data = await httpsGet(LIVE_API_URL);
+                    if (data && data.daily) {
+                        LIVE_CACHE.data = data.daily;
+                        LIVE_CACHE.timestamp = now;
+                        return data.daily;
+                    }
+                } catch (e) {
+                    console.error('Failed to fetch live rates:', e);
+                }
+                return null;
+            }
+
             const data = await httpsGet(API_URL);
 
             // SANITIZATION LOGIC AND FILTERING
             if (data && data.success && data.data && data.data.assets) {
-                Object.keys(data.data.assets).forEach(assetKey => {
+                // Fetch live rates once if needed
+                let liveRates = null;
+
+                // Process each asset
+                const assetKeys = Object.keys(data.data.assets);
+                for (const assetKey of assetKeys) {
                     const asset = data.data.assets[assetKey];
                     if (asset.dailyRatios && Array.isArray(asset.dailyRatios)) {
-                        // Remove trailing entries where ratio is exactly 1 (invalid/default)
-                        // Iterate backwards
+
+                        // 1. Remove trailing invalid data
                         let i = asset.dailyRatios.length - 1;
                         while (i >= 0 && asset.dailyRatios[i].ratio === 1) {
                             i--;
                         }
-                        // If we found any valid data, slice everything after it
+                        // Cut off invalid tail
                         if (i < asset.dailyRatios.length - 1) {
                             asset.dailyRatios = asset.dailyRatios.slice(0, i + 1);
                         }
+
+                        // 2. Check if we need to append Today's Live Ratio
+                        // If the last valid date is NOT today (or simply if we stripped recent data), try to patch.
+                        // Simple check: compare last date with today
+                        const lastEntry = asset.dailyRatios.length > 0 ? asset.dailyRatios[asset.dailyRatios.length - 1] : null;
+                        const todayStr = new Date().toISOString().split('T')[0];
+                        const lastDateStr = lastEntry ? new Date(lastEntry.date).toISOString().split('T')[0] : '';
+
+                        if (lastDateStr !== todayStr) {
+                            // Fetch live rates lazily
+                            if (!liveRates) {
+                                liveRates = await getLiveRates();
+                            }
+
+                            if (liveRates) {
+                                // Match keys. Historical: SNEK, Live: SNEK (or snek?)
+                                // Try exact, then lowercase
+                                const liveAssetData = liveRates[assetKey] || liveRates[assetKey.toLowerCase()];
+                                if (liveAssetData && liveAssetData.currentRatio && liveAssetData.currentRatio !== 1) {
+                                    // Append
+                                    asset.dailyRatios.push({
+                                        date: new Date().toISOString(), // Use Request Time
+                                        ratio: liveAssetData.currentRatio
+                                    });
+                                    console.log(`[Proxy] Patched live ratio for ${assetKey}: ${liveAssetData.currentRatio}`);
+                                }
+                            }
+                        }
                     }
-                });
+                }
             }
 
             res.writeHead(200, { 'Content-Type': 'application/json' });
