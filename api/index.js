@@ -131,6 +131,26 @@ module.exports = async (req, res) => {
     if (req.url === '/api/ratios') {
         try {
             const data = await httpsGet(API_URL);
+
+            // SANITIZATION LOGIC AND FILTERING
+            if (data && data.success && data.data && data.data.assets) {
+                Object.keys(data.data.assets).forEach(assetKey => {
+                    const asset = data.data.assets[assetKey];
+                    if (asset.dailyRatios && Array.isArray(asset.dailyRatios)) {
+                        // Remove trailing entries where ratio is exactly 1 (invalid/default)
+                        // Iterate backwards
+                        let i = asset.dailyRatios.length - 1;
+                        while (i >= 0 && asset.dailyRatios[i].ratio === 1) {
+                            i--;
+                        }
+                        // If we found any valid data, slice everything after it
+                        if (i < asset.dailyRatios.length - 1) {
+                            asset.dailyRatios = asset.dailyRatios.slice(0, i + 1);
+                        }
+                    }
+                });
+            }
+
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify(data));
         } catch (e) {
