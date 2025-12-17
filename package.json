@@ -4,5 +4,8 @@
   "scripts": {
     "start": "node local-server.js"
   },
-  "dependencies": {}
+  "dependencies": {
+    "@vercel/blob": "^2.0.0",
+    "dotenv": "^17.2.3"
+  }
 }

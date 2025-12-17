@@ -154,12 +154,57 @@ module.exports = async (req, res) => {
                 return null;
             }
 
+            // --- VERCEL BLOB CACHE LOGIC START ---
+            const { put } = require('@vercel/blob');
+            // We use fetch to read the blob since @vercel/blob `list` or `head` gives metadata, 
+            // but we need the content. We can store the URL or just guess it?
+            // Actually, for a single known file, `put` returns the url.
+            // Ideally we should list to find it, or use a fixed URL if we knew it?
+            // But Vercel Blob URLs are unique per put.
+            // So we need to `list` to find the latest file named 'ratios-cache.json'.
+            const { list } = require('@vercel/blob');
+
+            const CACHE_FILENAME = 'ratios-cache.json';
+
+            async function loadBlobCache() {
+                try {
+                    const { blobs } = await list({ prefix: CACHE_FILENAME, limit: 1 });
+                    if (blobs.length > 0) {
+                        const latest = blobs[0]; // List returns latest first by default? No, verifies below.
+                        // Actually list returns data. blobs is array.
+                        // Let's assume the first one matching prefix is mostly likely it if we clean up.
+                        // But for simplicity, let's just GET the downloadUrl.
+                        const response = await fetch(latest.url);
+                        if (response.ok) {
+                            return await response.json();
+                        }
+                    }
+                } catch (e) {
+                    console.error('Failed to load blob cache:', e);
+                }
+                return {};
+            }
+
+            async function saveBlobCache(cacheData) {
+                try {
+                    // Overwrite
+                    await put(CACHE_FILENAME, JSON.stringify(cacheData, null, 2), {
+                        access: 'public',
+                        addRandomSuffix: false // Important to keep filename constant-ish or manageable
+                    });
+                    console.log('[Proxy] Blob cache saved.');
+                } catch (e) {
+                    console.error('Failed to save blob cache:', e);
+                }
+            }
+            // --- VERCEL BLOB CACHE LOGIC END ---
+
             const data = await httpsGet(API_URL);
 
             // SANITIZATION LOGIC AND FILTERING
             if (data && data.success && data.data && data.data.assets) {
-                // Fetch live rates once if needed
-                let liveRates = null;
+                const localCache = await loadBlobCache();
+                let cacheUpdated = false;
 
                 // Process each asset
                 const assetKeys = Object.keys(data.data.assets);
@@ -177,34 +222,69 @@ module.exports = async (req, res) => {
                             asset.dailyRatios = asset.dailyRatios.slice(0, i + 1);
                         }
 
-                        // 2. Check if we need to append Today's Live Ratio
-                        // If the last valid date is NOT today (or simply if we stripped recent data), try to patch.
-                        // Simple check: compare last date with today
+                        // 2. Merge with Local Cache
+                        // Cache structure: { "SNEK": [ { "date": "...", "ratio": 1.23 } ] }
+                        if (localCache[assetKey]) {
+                            const cachedRatios = localCache[assetKey];
+                            const lastApiDate = asset.dailyRatios.length > 0 ?
+                                new Date(asset.dailyRatios[asset.dailyRatios.length - 1].date).getTime() : 0;
+
+                            // Append cached items that are strictly NEWER than API data
+                            for (const cachedItem of cachedRatios) {
+                                const cachedTime = new Date(cachedItem.date).getTime();
+                                if (cachedTime > lastApiDate) {
+                                    // Check if duplicate (e.g. same day already added via cache)
+                                    // Actually, just append if sorted.
+                                    // Let's double check avoiding dups by date string
+                                    const cachedDateStr = cachedItem.date.split('T')[0];
+                                    const exists = asset.dailyRatios.some(r => r.date.split('T')[0] === cachedDateStr);
+                                    if (!exists) {
+                                        asset.dailyRatios.push(cachedItem);
+                                    }
+                                }
+                            }
+                        }
+
+                        // 3. Check if we need to append Today's Live Ratio
                         const lastEntry = asset.dailyRatios.length > 0 ? asset.dailyRatios[asset.dailyRatios.length - 1] : null;
                         const todayStr = new Date().toISOString().split('T')[0];
                         const lastDateStr = lastEntry ? new Date(lastEntry.date).toISOString().split('T')[0] : '';
 
                         if (lastDateStr !== todayStr) {
                             // Fetch live rates lazily
-                            if (!liveRates) {
-                                liveRates = await getLiveRates();
-                            }
+                            // Helper: Get Live Rates
+                            let liveRates = await getLiveRates();
 
                             if (liveRates) {
-                                // Match keys. Historical: SNEK, Live: SNEK (or snek?)
-                                // Try exact, then lowercase
                                 const liveAssetData = liveRates[assetKey] || liveRates[assetKey.toLowerCase()];
                                 if (liveAssetData && liveAssetData.currentRatio && liveAssetData.currentRatio !== 1) {
-                                    // Append
-                                    asset.dailyRatios.push({
+                                    const newItem = {
                                         date: new Date().toISOString(), // Use Request Time
                                         ratio: liveAssetData.currentRatio
-                                    });
+                                    };
+
+                                    // Append to response
+                                    asset.dailyRatios.push(newItem);
                                     console.log(`[Proxy] Patched live ratio for ${assetKey}: ${liveAssetData.currentRatio}`);
+
+                                    // Update Local Cache
+                                    if (!localCache[assetKey]) localCache[assetKey] = [];
+
+                                    // Add to cache if not exists for today
+                                    const existsInCache = localCache[assetKey].some(r => r.date.split('T')[0] === todayStr);
+                                    if (!existsInCache) {
+                                        localCache[assetKey].push(newItem);
+                                        cacheUpdated = true;
+                                    }
                                 }
                             }
                         }
                     }
+                }
+
+                if (cacheUpdated) {
+                    await saveBlobCache(localCache);
+                    console.log('[Proxy] Blob cache updated.');
                 }
             }
 
